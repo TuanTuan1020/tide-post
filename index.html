@@ -44,7 +44,7 @@ footer{padding:11px 0 0;flex-wrap:wrap}.legend{display:flex;align-items:center;g
 <p id="message">收集朱红月印，避开黑色礁石。</p>
 <button class="primary" id="play">开始航行　↗</button>
 </div>
-<div class="stage-controls"><button id="pause" aria-label="暂停">Ⅱ</button><button id="sound" aria-pressed="false">音效关</button></div>
+<div class="stage-controls"><button id="pace" aria-label="舒缓速度" aria-pressed="true">舒缓</button><button id="pause" aria-label="暂停">Ⅱ</button><button id="sound" aria-pressed="false">音效关</button></div>
 <div class="callout mono" id="callout"></div>
 </section>
 <footer class="mono"><div class="legend"><kbd>空格</kbd> / 点按海面换道 <b>✦</b> 拾印连击 <kbd>Esc</kbd> 暂停</div><div class="chapter" id="tide">第一潮 · 暮海</div></footer>
@@ -56,7 +56,11 @@ const sea = get("sea");
 const ctx = sea.getContext("2d");
 const paper = document.createElement("canvas");
 const print = paper.getContext("2d");
-const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let gentle = true;
+try {
+  gentle = matchMedia("(prefers-reduced-motion: reduce)").matches ||
+    localStorage.getItem("tide-post-pace") !== "standard";
+} catch {}
 const palettes = [
   ["第一潮 · 暮海","#e7d6ad","#bf4734","#496876","#293f50","#203d50","#142f40","#b5c1b5"],
   ["第二潮 · 紫夜","#cfbbbc","#a93852","#655771","#493f5b","#39334f","#28273e","#c4afbf"],
@@ -66,10 +70,9 @@ const rng = seed => () => {
   seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
   return seed / 4294967296;
 };
-const texture = rng(917);
-let width, height, ratio, mode = "intro", last = 0, elapsed = 0, drift = 0;
+let width, height, ratio, mode = "intro", last = 0, elapsed = 0;
 let score = 0, best = 0, streak = 0, phase = 0, serial = 0;
-let lane = 0, boatY = 0, objects = [], sparks = [], next = 0, flash = 0;
+let lane = 0, boatY = 0, objects = [], next = 0, calloutTime = 0;
 let audio, muted = true;
 try { best = Number(localStorage.getItem("tide-post-best")) || 0; } catch {}
 const format = value => String(value).padStart(3,"0");
@@ -92,12 +95,12 @@ function resize() {
   ctx.setTransform(ratio,0,0,ratio,0,0);
   print.setTransform(ratio,0,0,ratio,0,0);
   boatY = water(lane);
-  paintSky();
+  paintBackdrop();
 }
 function water(index) { return height*(index ? .81 : .65); }
 function boatX() { return width*(width<600 ? .21 : .24); }
 function paintSky() {
-  const [,sky,red,haze] = palettes[phase];
+  const [,sky,red,haze] = palettes[gentle?0:phase];
   const rand = rng(341);
   print.fillStyle=sky; print.fillRect(0,0,width,height);
   const moonX=width*(width<600?.77:.73), moonY=height*.32;
@@ -136,20 +139,21 @@ function paintSky() {
 function wave(x,y,t,i) {
   return y+Math.sin(x*.012+t+i*1.5)*(7+i*1.8)+Math.sin(x*.029+t*1.6+i)*4;
 }
-function seaLine(y,t,i,step=9) {
-  ctx.beginPath();ctx.moveTo(-step,wave(-step,y,t,i));
-  for(let x=0;x<=width+step;x+=step)ctx.lineTo(x,wave(x,y,t,i));
+function seaLine(c,y,t,i,step=9) {
+  c.beginPath();c.moveTo(-step,wave(-step,y,t,i));
+  for(let x=0;x<=width+step;x+=step)c.lineTo(x,wave(x,y,t,i));
 }
-function paintWater(t) {
-  const [,,, ,back,middle,front,foam]=palettes[phase];
+function paintWater(c) {
+  const t = 0;
+  const [,,, ,back,middle,front,foam]=palettes[gentle?0:phase];
   for(const [i,color] of [back,middle,front].entries()){
     const y=height*(.55+i*.135);
-    seaLine(y,t,i);ctx.lineTo(width+12,height);ctx.lineTo(-12,height);ctx.closePath();
-    ctx.fillStyle=color;ctx.fill();
+    seaLine(c,y,t,i);c.lineTo(width+12,height);c.lineTo(-12,height);c.closePath();
+    c.fillStyle=color;c.fill();
     for(let j=0;j<9;j++){
-      seaLine(y+3+j*3.5,t+j*.11,i);
-      ctx.globalAlpha=j===0?.67:.21-j*.013;ctx.lineWidth=j===0?1.4:.75;
-      ctx.strokeStyle=foam;ctx.stroke();
+      seaLine(c,y+3+j*3.5,t+j*.11,i);
+      c.globalAlpha=j===0?.67:.21-j*.013;c.lineWidth=j===0?1.4:.75;
+      c.strokeStyle=foam;c.stroke();
     }
   }
   const rand=rng(233);
@@ -157,15 +161,19 @@ function paintWater(t) {
     const depth=rand(), span=4+rand()*48, opacity=rand(), position=rand();
     const x=((position*width-t*(9+depth*13))%(width+70)+width+70)%(width+70)-55;
     const y=height*(.575+depth*.425)+Math.sin(x*.015+t+i)*4;
-    ctx.globalAlpha=.04+opacity*.24;ctx.strokeStyle=foam;ctx.lineWidth=i%9===0?1.8:.7;
-    ctx.beginPath();ctx.moveTo(x,y);ctx.quadraticCurveTo(x+span*.48,y-3,x+span,y);ctx.stroke();
+    c.globalAlpha=.04+opacity*.24;c.strokeStyle=foam;c.lineWidth=i%9===0?1.8:.7;
+    c.beginPath();c.moveTo(x,y);c.quadraticCurveTo(x+span*.48,y-3,x+span,y);c.stroke();
   }
-  ctx.globalAlpha=1;
+  c.globalAlpha=1;
   for(let i=0;i<2;i++){
     const y=water(i)+8;
-    ctx.setLineDash([2,9]);ctx.strokeStyle="#faedc24a";ctx.lineWidth=1;
-    ctx.beginPath();ctx.moveTo(12,y);ctx.lineTo(width-12,y);ctx.stroke();ctx.setLineDash([]);
+    c.setLineDash([2,9]);c.strokeStyle="#faedc24a";c.lineWidth=1;
+    c.beginPath();c.moveTo(12,y);c.lineTo(width-12,y);c.stroke();c.setLineDash([]);
   }
+}
+function paintBackdrop() {
+  paintSky();
+  paintWater(print);
 }
 function rock(x,y,size) {
   ctx.save();ctx.translate(x,y);ctx.scale(size,size);
@@ -182,8 +190,8 @@ function seal(x,y,size) {
   ellipse(ctx,x,y-13,size-1.6,size-1.6,"#a9332b");
   polygon(ctx,[[x,y-20],[x+2,y-15],[x+7,y-13],[x+2,y-11],[x,y-6],[x-2,y-11],[x-7,y-13],[x-2,y-15]],"#ffe9b8");
 }
-function boat(x,y,t) {
-  ctx.save();ctx.translate(x,y+Math.sin(t*4)*2);ctx.rotate(Math.sin(t*3)*.045);
+function boat(x,y) {
+  ctx.save();ctx.translate(x,y);
   for(let i=0;i<5;i++){
     ctx.globalAlpha=.64-i*.09;ctx.strokeStyle="#f4e6c3";ctx.lineWidth=1;
     ctx.beginPath();ctx.moveTo(-25-i*10,5+i%2*4);ctx.quadraticCurveTo(-12-i*9,9+i%2*4,-3-i*8,5);ctx.stroke();
@@ -216,10 +224,10 @@ function show(newMode,title,message,action) {
   if(title){get("heading").textContent=title;get("message").textContent=message;get("play").textContent=action;}
 }
 function start() {
-  elapsed=0;drift=0;next=.42;lane=0;boatY=water(0);objects=[];sparks=[];
-  phase=0;score=0;streak=0;serial=0;flash=0;
+  elapsed=0;next=.42;lane=0;boatY=water(0);objects=[];
+  phase=0;score=0;streak=0;serial=0;calloutTime=0;
   get("score").textContent=format(score);get("callout").textContent="";
-  get("tide").textContent=palettes[phase][0];paintSky();show("run");sea.focus({preventScroll:true});
+  get("tide").textContent=palettes[phase][0];paintBackdrop();show("run");sea.focus({preventScroll:true});
 }
 function pause() {
   if(mode==="run"){
@@ -248,14 +256,17 @@ function addPair() {
   serial++;
 }
 function update(dt) {
-  elapsed+=dt;drift+=dt;flash=Math.max(0,flash-dt);
-  if(!flash)get("callout").textContent="";
+  elapsed+=dt;
+  if(calloutTime>0){
+    calloutTime=Math.max(0,calloutTime-dt);
+    if(calloutTime===0)get("callout").textContent="";
+  }
   const chapter=Math.min(2,Math.floor(elapsed/23));
-  if(chapter!==phase){phase=chapter;paintSky();get("tide").textContent=palettes[phase][0];tone([392,523,659]);}
+  if(chapter!==phase){phase=chapter;if(!gentle)paintBackdrop();get("tide").textContent=palettes[phase][0];tone([392,523,659]);}
   next-=dt;
-  if(next<=0){addPair();next+=Math.max(.72,1.42-elapsed*.011);}
+  if(next<=0){addPair();next+=gentle?2:Math.max(1,1.6-elapsed*.008);}
   boatY+=(water(lane)-boatY)*Math.min(1,dt*18);
-  const speed=Math.max(245,width*.38)*Math.min(1.85,1+elapsed*.012);
+  const speed=width*(gentle?.27:.36)*Math.min(gentle?1.2:1.45,1+elapsed*.006);
   const playerX=boatX();
   for(const obj of objects){
     obj.x-=speed*dt;
@@ -266,23 +277,17 @@ function update(dt) {
       if(!obj.seal){end();break;}
       streak++;const multiplier=Math.min(5,1+Math.floor(streak/3));
       score+=10*multiplier;get("score").textContent=format(score);
-      flash=.92;get("callout").textContent="月印 +"+10*multiplier+"  ·  "+streak+" 连击";
+      calloutTime=1.3;get("callout").textContent="月印 +"+10*multiplier+"  ·  "+streak+" 连击";
       tone([392*Math.pow(2,(streak%5)/12),587]);
-      for(let i=0;i<11;i++)sparks.push({x:obj.x,y:boatY-13,vx:(Math.random()-.5)*125,vy:-15-Math.random()*85,life:.4+Math.random()*.3});
     }else if(obj.seal&&obj.x<playerX-31){obj.done=true;streak=0;}
   }
   objects=objects.filter(o=>o.x>-60&&(!o.done||!o.seal));
-  for(const p of sparks){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=120*dt;p.life-=dt;}
-  sparks=sparks.filter(p=>p.life>0);
 }
 function frame(now) {
   const dt=Math.min(.04,(now-(last||now))/1000);
   last=now;
   if(mode==="run")update(dt);
-  if(mode==="intro"&&!reduced)drift+=dt*.5;
-  const t=reduced?0:drift;
   ctx.drawImage(paper,0,0,width,height);
-  paintWater(t);
   if(mode==="intro"){
     rock(width*.82,water(0),1.08);
     rock(width*.64,water(1),.92);
@@ -293,13 +298,21 @@ function frame(now) {
     if(obj.seal)seal(obj.x,water(obj.lane),10);
     else rock(obj.x,water(obj.lane),1);
   }
-  boat(boatX(),boatY,t);
-  for(const p of sparks){
-    ctx.globalAlpha=Math.min(1,p.life*3);ellipse(ctx,p.x,p.y,1.8,1.8,"#f6bf74");
-  }
-  ctx.globalAlpha=1;
+  boat(boatX(),boatY);
   requestAnimationFrame(frame);
 }
+function syncPace() {
+  get("pace").textContent=gentle?"舒缓":"标准";
+  get("pace").setAttribute("aria-pressed",String(gentle));
+}
+get("pace").addEventListener("click",()=>{
+  gentle=!gentle;
+  syncPace();
+  paintBackdrop();
+  try{localStorage.setItem("tide-post-pace",gentle?"gentle":"standard");}catch{}
+  if(mode==="run")sea.focus({preventScroll:true});
+});
+syncPace();
 get("play").addEventListener("click",action);
 get("pause").addEventListener("click",pause);
 get("sound").addEventListener("click",async()=>{

@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="驾驶纸船穿过版画海面，收集月印的单键街机游戏。">
+<title>潮汐邮差 · TIDE POST</title>
+<style>
+:root{color-scheme:light;--paper:#f2e8d2;--ink:#172a35;--red:#ab392c;--rule:#b6ad99}
+*{box-sizing:border-box}body{margin:0;color:var(--ink);background:#eee4d0;font-family:"Songti SC","Noto Serif CJK SC",serif}
+main{width:min(1240px,calc(100% - 56px));margin:26px auto}
+header,footer,.scores,.mast{display:flex;align-items:center;justify-content:space-between;gap:16px}
+header{border-bottom:1px solid var(--ink);padding:0 0 12px}
+.mono,button,kbd{font-family:"IBM Plex Mono","Courier New","PingFang SC",monospace;font-size:12px;letter-spacing:.09em}
+.brand{display:flex;align-items:center;gap:10px;font-weight:bold}.stamp{background:var(--red);color:#fff3dc;padding:4px 6px;font-size:16px;letter-spacing:0}
+button{cursor:pointer;border:1px solid var(--ink);background:transparent;color:inherit;padding:9px 12px}
+button:hover{background:#172a3514}button:focus-visible,[tabindex]:focus-visible{outline:2px solid #bb4936;outline-offset:4px}
+.mast{align-items:end;padding:22px 0 15px}
+h1{font-weight:900;font-size:clamp(47px,8vw,99px);line-height:.92;letter-spacing:-.07em;margin:0}
+.subtitle{margin:10px 0 0;color:var(--red);font-size:12px;letter-spacing:.27em}
+.scores{gap:clamp(12px,3vw,45px);text-align:right}.scores span{display:block;font-size:11px;white-space:nowrap;color:#4a5559}.scores strong{font-size:clamp(21px,3vw,35px);font-weight:400;font-variant-numeric:tabular-nums;display:block;margin-top:4px}
+.stage{position:relative;border:1px solid var(--ink);padding:5px;background:var(--paper);overflow:hidden;touch-action:manipulation}
+canvas{display:block;width:100%;height:clamp(360px,58vh,610px);background:#e6d6b6;cursor:pointer}
+.overlay{position:absolute;left:clamp(21px,6%,82px);top:10%;width:min(320px,calc(100% - 42px));pointer-events:none}
+.overlay[hidden]{display:none}.overlay h2{font-size:clamp(34px,5vw,61px);margin:6px 0;line-height:1.03;letter-spacing:-.07em}.overlay p{font-size:15px;margin:11px 0 17px;font-weight:600}.overline{color:#7e2c23}.primary{pointer-events:auto;background:var(--ink);border-color:var(--ink);color:#fff2d6;padding:12px 16px;min-width:130px;text-align:left}.primary:hover{background:#2c4b58}
+.stage-controls{display:flex;gap:6px;position:absolute;right:13px;top:13px}.stage-controls button{background:#f2e8d2e8}.stage-controls button:hover{background:#fff3da}
+.callout{position:absolute;bottom:20px;left:23px;color:#f8e7c0;pointer-events:none;text-shadow:0 1px 3px #172a35}
+footer{padding:11px 0 0;flex-wrap:wrap}.legend{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.legend b{color:var(--red);font-size:17px}kbd{border:1px solid var(--rule);padding:3px 5px;letter-spacing:0}.chapter{color:#49585a}
+@media(max-width:580px){main{width:calc(100% - 24px);margin:13px auto}.mast{padding-top:17px;gap:7px}.scores{gap:8px}.subtitle{font-size:10px}.scores span{font-size:9px}canvas{height:clamp(390px,66svh,580px)}.overlay{top:14%}.chapter{display:none}.callout{bottom:13px;left:14px}}
+</style>
+</head>
+<body>
+<main>
+<header><div class="brand mono"><span class="stamp">潮</span> TIDE POST</div><div class="mono">单键街机</div></header>
+<section class="mast" aria-label="游戏信息">
+<div><h1>潮汐邮差</h1><p class="subtitle mono">THE MOON TIDE</p></div>
+<div class="scores mono"><div><span>月印积分</span><strong id="score">000</strong></div><div><span>最高纪录</span><strong id="best">000</strong></div></div>
+</section>
+<section class="stage" aria-label="游戏区域">
+<canvas id="sea" tabindex="0" aria-label="纸船航道，点击或按空格换道"></canvas>
+<div class="overlay" id="overlay">
+<div class="mono overline" id="chapter">第一潮 · 暮海</div>
+<h2 id="heading">给月亮送信</h2>
+<p id="message">收集朱红月印，避开黑色礁石。</p>
+<button class="primary" id="play">开始航行　↗</button>
+</div>
+<div class="stage-controls"><button id="pause" aria-label="暂停">Ⅱ</button><button id="sound" aria-pressed="false">音效关</button></div>
+<div class="callout mono" id="callout"></div>
+</section>
+<footer class="mono"><div class="legend"><kbd>空格</kbd> / 点按海面换道 <b>✦</b> 拾印连击 <kbd>Esc</kbd> 暂停</div><div class="chapter" id="tide">第一潮 · 暮海</div></footer>
+</main>
+<script>
+"use strict";
+const get = id => document.getElementById(id);
+const sea = get("sea");
+const ctx = sea.getContext("2d");
+const paper = document.createElement("canvas");
+const print = paper.getContext("2d");
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const palettes = [
+  ["第一潮 · 暮海","#e7d6ad","#bf4734","#496876","#293f50","#203d50","#142f40","#b5c1b5"],
+  ["第二潮 · 紫夜","#cfbbbc","#a93852","#655771","#493f5b","#39334f","#28273e","#c4afbf"],
+  ["第三潮 · 金晓","#edcf96","#c9582d","#736857","#565b4d","#3d5149","#253c37","#dfc69a"]
+];
+const rng = seed => () => {
+  seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+  return seed / 4294967296;
+};
+const texture = rng(917);
+let width, height, ratio, mode = "intro", last = 0, elapsed = 0, drift = 0;
+let score = 0, best = 0, streak = 0, phase = 0, serial = 0;
+let lane = 0, boatY = 0, objects = [], sparks = [], next = 0, flash = 0;
+let audio, muted = true;
+try { best = Number(localStorage.getItem("tide-post-best")) || 0; } catch {}
+const format = value => String(value).padStart(3,"0");
+get("best").textContent = format(best);
+
+function ellipse(c,x,y,rx,ry,color) {
+  c.beginPath(); c.ellipse(x,y,rx,ry,0,0,Math.PI*2); c.fillStyle=color; c.fill();
+}
+function polygon(c,points,color) {
+  c.beginPath(); c.moveTo(...points[0]);
+  for (const point of points.slice(1)) c.lineTo(...point);
+  c.closePath(); c.fillStyle=color; c.fill();
+}
+function resize() {
+  const rect = sea.getBoundingClientRect();
+  width = rect.width; height = rect.height;
+  ratio = Math.min(devicePixelRatio || 1,2);
+  sea.width = Math.round(width*ratio); sea.height = Math.round(height*ratio);
+  paper.width = sea.width; paper.height = sea.height;
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  print.setTransform(ratio,0,0,ratio,0,0);
+  boatY = water(lane);
+  paintSky();
+}
+function water(index) { return height*(index ? .81 : .65); }
+function boatX() { return width*(width<600 ? .21 : .24); }
+function paintSky() {
+  const [,sky,red,haze] = palettes[phase];
+  const rand = rng(341);
+  print.fillStyle=sky; print.fillRect(0,0,width,height);
+  const moonX=width*(width<600?.77:.73), moonY=height*.32;
+  const radius=Math.min(width*.26,height*.235);
+  print.save(); print.beginPath(); print.arc(moonX,moonY,radius,0,Math.PI*2); print.clip();
+  print.fillStyle=red; print.fillRect(moonX-radius,moonY-radius,radius*2,radius*2);
+  for(let i=0;i<1450;i++){
+    print.globalAlpha=.04+rand()*.17;
+    print.fillStyle=i%4?"#f3d3a0":"#542724";
+    print.fillRect(moonX+(rand()*2-1)*radius,moonY+(rand()*2-1)*radius,1+rand()*10,.4+rand()*1.5);
+  }
+  print.restore();
+  for(let layer=0;layer<3;layer++){
+    const points=[[0,height*.64]];
+    for(let x=0;x<width+12;x+=9){
+      const n=x/width;
+      const peak=Math.max(0,1-Math.abs(n-(.44+layer*.14))/(.26-layer*.025));
+      const y=height*(.59+layer*.028-.19*peak+Math.sin(x*.048+layer)*.009+rand()*.018);
+      points.push([x,y]);
+    }
+    points.push([width,height*.68]);
+    print.globalAlpha=.25+layer*.16; polygon(print,points,haze);
+  }
+  print.globalAlpha=1;
+  for(let i=0;i<5500;i++){
+    print.globalAlpha=.04+rand()*.11; print.fillStyle=i%3?"#5e452c":"#fff5dd";
+    print.fillRect(rand()*width,rand()*height,rand()*2+.3,rand()*1.3+.25);
+  }
+  print.globalAlpha=1;
+  for(const bird of [[.52,.17,9],[.58,.135,5],[.65,.21,7]]){
+    const [u,v,s]=bird,x=u*width,y=v*height;
+    print.beginPath();print.moveTo(x-s,y+1);print.quadraticCurveTo(x-s*.3,y-s*.7,x,y+1);
+    print.quadraticCurveTo(x+s*.45,y-s*.6,x+s,y);print.strokeStyle="#283638";print.lineWidth=1;print.stroke();
+  }
+}
+function wave(x,y,t,i) {
+  return y+Math.sin(x*.012+t+i*1.5)*(7+i*1.8)+Math.sin(x*.029+t*1.6+i)*4;
+}
+function seaLine(y,t,i,step=9) {
+  ctx.beginPath();ctx.moveTo(-step,wave(-step,y,t,i));
+  for(let x=0;x<=width+step;x+=step)ctx.lineTo(x,wave(x,y,t,i));
+}
+function paintWater(t) {
+  const [,,, ,back,middle,front,foam]=palettes[phase];
+  for(const [i,color] of [back,middle,front].entries()){
+    const y=height*(.55+i*.135);
+    seaLine(y,t,i);ctx.lineTo(width+12,height);ctx.lineTo(-12,height);ctx.closePath();
+    ctx.fillStyle=color;ctx.fill();
+    for(let j=0;j<9;j++){
+      seaLine(y+3+j*3.5,t+j*.11,i);
+      ctx.globalAlpha=j===0?.67:.21-j*.013;ctx.lineWidth=j===0?1.4:.75;
+      ctx.strokeStyle=foam;ctx.stroke();
+    }
+  }
+  const rand=rng(233);
+  for(let i=0;i<280;i++){
+    const depth=rand(), span=4+rand()*48, opacity=rand(), position=rand();
+    const x=((position*width-t*(9+depth*13))%(width+70)+width+70)%(width+70)-55;
+    const y=height*(.575+depth*.425)+Math.sin(x*.015+t+i)*4;
+    ctx.globalAlpha=.04+opacity*.24;ctx.strokeStyle=foam;ctx.lineWidth=i%9===0?1.8:.7;
+    ctx.beginPath();ctx.moveTo(x,y);ctx.quadraticCurveTo(x+span*.48,y-3,x+span,y);ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  for(let i=0;i<2;i++){
+    const y=water(i)+8;
+    ctx.setLineDash([2,9]);ctx.strokeStyle="#faedc24a";ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(12,y);ctx.lineTo(width-12,y);ctx.stroke();ctx.setLineDash([]);
+  }
+}
+function rock(x,y,size) {
+  ctx.save();ctx.translate(x,y);ctx.scale(size,size);
+  ellipse(ctx,0,2,24,5,"#111f2a");
+  polygon(ctx,[[-23,0],[-16,-10],[-12,-10],[-5,-25],[3,-31],[9,-19],[15,-16],[23,0]],"#121e28");
+  polygon(ctx,[[-19,-1],[-5,-25],[3,-31],[1,-17],[6,-13],[-3,-1]],"#5e6d70");
+  polygon(ctx,[[2,-2],[9,-18],[15,-16],[22,0]],"#263d49");
+  ctx.strokeStyle="#e9dfbc";ctx.lineWidth=1;ctx.beginPath();
+  ctx.moveTo(-28,3);ctx.quadraticCurveTo(-12,7,-2,3);ctx.moveTo(9,4);ctx.lineTo(27,3);ctx.stroke();
+  ctx.restore();
+}
+function seal(x,y,size) {
+  ellipse(ctx,x,y-13,size,size,"#f1dcb0");
+  ellipse(ctx,x,y-13,size-1.6,size-1.6,"#a9332b");
+  polygon(ctx,[[x,y-20],[x+2,y-15],[x+7,y-13],[x+2,y-11],[x,y-6],[x-2,y-11],[x-7,y-13],[x-2,y-15]],"#ffe9b8");
+}
+function boat(x,y,t) {
+  ctx.save();ctx.translate(x,y+Math.sin(t*4)*2);ctx.rotate(Math.sin(t*3)*.045);
+  for(let i=0;i<5;i++){
+    ctx.globalAlpha=.64-i*.09;ctx.strokeStyle="#f4e6c3";ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(-25-i*10,5+i%2*4);ctx.quadraticCurveTo(-12-i*9,9+i%2*4,-3-i*8,5);ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  polygon(ctx,[[-27,-9],[-10,0],[26,-11],[15,4],[-11,6]],"#eedcb3");
+  polygon(ctx,[[-26,-8],[-7,-11],[-2,-22],[14,-6],[-10,0]],"#fff0c9");
+  polygon(ctx,[[-10,0],[26,-11],[15,4]],"#c4996e");
+  polygon(ctx,[[-5,-14],[-2,-22],[14,-6],[5,-8]],"#d6b186");
+  ellipse(ctx,-5,-5,3.1,2.4,"#af3f32");
+  ctx.restore();
+}
+function tone(notes) {
+  if(muted || !audio || audio.state!=="running")return;
+  notes.forEach((hz,i)=>{
+    const osc=audio.createOscillator(), gain=audio.createGain();
+    const t=audio.currentTime+i*.065;
+    osc.type="triangle";osc.frequency.value=hz;
+    gain.gain.setValueAtTime(.0001,t);gain.gain.exponentialRampToValueAtTime(.10,t+.016);
+    gain.gain.exponentialRampToValueAtTime(.0001,t+.26);
+    osc.connect(gain).connect(audio.destination);osc.start(t);osc.stop(t+.28);
+  });
+}
+function show(newMode,title,message,action) {
+  mode=newMode;
+  get("overlay").hidden=mode==="run";
+  get("pause").disabled=mode==="intro"||mode==="end";
+  get("pause").textContent=mode==="pause"?"▶":"Ⅱ";
+  get("pause").setAttribute("aria-label",mode==="pause"?"继续":"暂停");
+  if(title){get("heading").textContent=title;get("message").textContent=message;get("play").textContent=action;}
+}
+function start() {
+  elapsed=0;drift=0;next=.42;lane=0;boatY=water(0);objects=[];sparks=[];
+  phase=0;score=0;streak=0;serial=0;flash=0;
+  get("score").textContent=format(score);get("callout").textContent="";
+  get("tide").textContent=palettes[phase][0];paintSky();show("run");sea.focus({preventScroll:true});
+}
+function pause() {
+  if(mode==="run"){
+    show("pause","航行暂停","纸船停在原处。","继续航行　↗");get("play").focus({preventScroll:true});
+  } else if(mode==="pause"){show("run");sea.focus({preventScroll:true});}
+}
+function action() {
+  if(mode==="pause"){pause();return;}
+  if(mode!=="run"){start();return;}
+  lane=1-lane;tone([lane?247:330]);
+}
+function end() {
+  const record=score>best;
+  if(record){
+    best=score;get("best").textContent=format(best);
+    try{localStorage.setItem("tide-post-best",String(best));}catch{}
+  }
+  get("chapter").textContent=palettes[phase][0];
+  get("callout").textContent="";
+  show("end",record?"新的航海纪录":"信落海了","本次航行 "+score+" 分 · "+Math.floor(elapsed)+" 秒","再航一次　↗");
+  get("play").focus({preventScroll:true});tone([196,123,82]);
+}
+function addPair() {
+  const safe=serial===0?0:serial===1?1:Math.random()<.5?0:1;
+  objects.push({x:width+28,lane:safe,seal:true},{x:width+28,lane:1-safe,seal:false});
+  serial++;
+}
+function update(dt) {
+  elapsed+=dt;drift+=dt;flash=Math.max(0,flash-dt);
+  if(!flash)get("callout").textContent="";
+  const chapter=Math.min(2,Math.floor(elapsed/23));
+  if(chapter!==phase){phase=chapter;paintSky();get("tide").textContent=palettes[phase][0];tone([392,523,659]);}
+  next-=dt;
+  if(next<=0){addPair();next+=Math.max(.72,1.42-elapsed*.011);}
+  boatY+=(water(lane)-boatY)*Math.min(1,dt*18);
+  const speed=Math.max(245,width*.38)*Math.min(1.85,1+elapsed*.012);
+  const playerX=boatX();
+  for(const obj of objects){
+    obj.x-=speed*dt;
+    if(obj.done)continue;
+    const dx=Math.abs(obj.x-playerX),dy=Math.abs(water(obj.lane)-boatY);
+    if(dx<(obj.seal?24:21)&&dy<16){
+      obj.done=true;
+      if(!obj.seal){end();break;}
+      streak++;const multiplier=Math.min(5,1+Math.floor(streak/3));
+      score+=10*multiplier;get("score").textContent=format(score);
+      flash=.92;get("callout").textContent="月印 +"+10*multiplier+"  ·  "+streak+" 连击";
+      tone([392*Math.pow(2,(streak%5)/12),587]);
+      for(let i=0;i<11;i++)sparks.push({x:obj.x,y:boatY-13,vx:(Math.random()-.5)*125,vy:-15-Math.random()*85,life:.4+Math.random()*.3});
+    }else if(obj.seal&&obj.x<playerX-31){obj.done=true;streak=0;}
+  }
+  objects=objects.filter(o=>o.x>-60&&(!o.done||!o.seal));
+  for(const p of sparks){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=120*dt;p.life-=dt;}
+  sparks=sparks.filter(p=>p.life>0);
+}
+function frame(now) {
+  const dt=Math.min(.04,(now-(last||now))/1000);
+  last=now;
+  if(mode==="run")update(dt);
+  if(mode==="intro"&&!reduced)drift+=dt*.5;
+  const t=reduced?0:drift;
+  ctx.drawImage(paper,0,0,width,height);
+  paintWater(t);
+  if(mode==="intro"){
+    rock(width*.82,water(0),1.08);
+    rock(width*.64,water(1),.92);
+    seal(width*.53,water(0),11);
+    seal(width*.87,water(1),11);
+  }
+  for(const obj of objects){
+    if(obj.seal)seal(obj.x,water(obj.lane),10);
+    else rock(obj.x,water(obj.lane),1);
+  }
+  boat(boatX(),boatY,t);
+  for(const p of sparks){
+    ctx.globalAlpha=Math.min(1,p.life*3);ellipse(ctx,p.x,p.y,1.8,1.8,"#f6bf74");
+  }
+  ctx.globalAlpha=1;
+  requestAnimationFrame(frame);
+}
+get("play").addEventListener("click",action);
+get("pause").addEventListener("click",pause);
+get("sound").addEventListener("click",async()=>{
+  muted=!muted;
+  if(!muted){
+    try{
+      const Audio=window.AudioContext||window.webkitAudioContext;
+      audio ||= new Audio();
+      await audio.resume();
+      tone([440,660]);
+    }catch{muted=true;}
+  }
+  get("sound").textContent=muted?"音效关":"音效开";
+  get("sound").setAttribute("aria-pressed",String(!muted));
+});
+sea.addEventListener("click",action);
+window.addEventListener("keydown",event=>{
+  if(event.repeat)return;
+  if(event.code==="Escape"){pause();return;}
+  if(event.code==="Space"&&!(event.target instanceof HTMLButtonElement)){
+    event.preventDefault();action();
+  }
+});
+document.addEventListener("visibilitychange",()=>{if(document.hidden&&mode==="run")pause();});
+new ResizeObserver(resize).observe(sea);
+resize();show("intro");requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -56,10 +56,9 @@ const sea = get("sea");
 const ctx = sea.getContext("2d");
 const paper = document.createElement("canvas");
 const print = paper.getContext("2d");
-let gentle = true;
+let gentle = matchMedia("(prefers-reduced-motion: reduce)").matches;
 try {
-  gentle = matchMedia("(prefers-reduced-motion: reduce)").matches ||
-    localStorage.getItem("tide-post-pace") !== "standard";
+  gentle ||= localStorage.getItem("tide-post-pace") === "gentle";
 } catch {}
 const palettes = [
   ["第一潮 · 暮海","#e7d6ad","#bf4734","#496876","#293f50","#203d50","#142f40","#b5c1b5"],
@@ -70,9 +69,9 @@ const rng = seed => () => {
   seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
   return seed / 4294967296;
 };
-let width, height, ratio, mode = "intro", last = 0, elapsed = 0;
-let score = 0, best = 0, streak = 0, phase = 0, serial = 0;
-let lane = 0, boatY = 0, objects = [], next = 0, calloutTime = 0;
+let width, height, ratio, mode = "intro", last = 0, elapsed = 0, drift = 0;
+let score = 0, best = 0, streak = 0, phase = 0;
+let lane = 0, boatY = 0, objects = [], nextSeal = 0, nextRock = 0, calloutTime = 0;
 let audio, muted = true;
 try { best = Number(localStorage.getItem("tide-post-best")) || 0; } catch {}
 const format = value => String(value).padStart(3,"0");
@@ -143,13 +142,12 @@ function seaLine(c,y,t,i,step=9) {
   c.beginPath();c.moveTo(-step,wave(-step,y,t,i));
   for(let x=0;x<=width+step;x+=step)c.lineTo(x,wave(x,y,t,i));
 }
-function paintWater(c) {
-  const t = 0;
+function paintWater(c,t) {
   const [,,, ,back,middle,front,foam]=palettes[gentle?0:phase];
   for(const [i,color] of [back,middle,front].entries()){
     const y=height*(.55+i*.135);
     seaLine(c,y,t,i);c.lineTo(width+12,height);c.lineTo(-12,height);c.closePath();
-    c.fillStyle=color;c.fill();
+    c.globalAlpha=1;c.fillStyle=color;c.fill();
     for(let j=0;j<9;j++){
       seaLine(c,y+3+j*3.5,t+j*.11,i);
       c.globalAlpha=j===0?.67:.21-j*.013;c.lineWidth=j===0?1.4:.75;
@@ -173,7 +171,7 @@ function paintWater(c) {
 }
 function paintBackdrop() {
   paintSky();
-  paintWater(print);
+  if(gentle)paintWater(print,0);
 }
 function rock(x,y,size) {
   ctx.save();ctx.translate(x,y);ctx.scale(size,size);
@@ -190,8 +188,8 @@ function seal(x,y,size) {
   ellipse(ctx,x,y-13,size-1.6,size-1.6,"#a9332b");
   polygon(ctx,[[x,y-20],[x+2,y-15],[x+7,y-13],[x+2,y-11],[x,y-6],[x-2,y-11],[x-7,y-13],[x-2,y-15]],"#ffe9b8");
 }
-function boat(x,y) {
-  ctx.save();ctx.translate(x,y);
+function boat(x,y,t) {
+  ctx.save();ctx.translate(x,y+Math.sin(t*4)*2);ctx.rotate(Math.sin(t*3)*.045);
   for(let i=0;i<5;i++){
     ctx.globalAlpha=.64-i*.09;ctx.strokeStyle="#f4e6c3";ctx.lineWidth=1;
     ctx.beginPath();ctx.moveTo(-25-i*10,5+i%2*4);ctx.quadraticCurveTo(-12-i*9,9+i%2*4,-3-i*8,5);ctx.stroke();
@@ -224,8 +222,8 @@ function show(newMode,title,message,action) {
   if(title){get("heading").textContent=title;get("message").textContent=message;get("play").textContent=action;}
 }
 function start() {
-  elapsed=0;next=.42;lane=0;boatY=water(0);objects=[];
-  phase=0;score=0;streak=0;serial=0;calloutTime=0;
+  elapsed=0;drift=0;nextSeal=.25+Math.random()*.55;nextRock=.65+Math.random()*.9;lane=0;boatY=water(0);objects=[];
+  phase=0;score=0;streak=0;calloutTime=0;
   get("score").textContent=format(score);get("callout").textContent="";
   get("tide").textContent=palettes[phase][0];paintBackdrop();show("run");sea.focus({preventScroll:true});
 }
@@ -250,10 +248,23 @@ function end() {
   show("end",record?"新的航海纪录":"信落海了","本次航行 "+score+" 分 · "+Math.floor(elapsed)+" 秒","再航一次　↗");
   get("play").focus({preventScroll:true});tone([196,123,82]);
 }
-function addPair() {
-  const safe=serial===0?0:serial===1?1:Math.random()<.5?0:1;
-  objects.push({x:width+28,lane:safe,seal:true},{x:width+28,lane:1-safe,seal:false});
-  serial++;
+function spawn(isSeal,speed) {
+  const x=width+28;
+  const preferredLane=Math.random()<.5?0:1;
+  for(const candidate of [preferredLane,1-preferredLane]){
+    const blocked=objects.some(obj=>{
+      if(obj.done)return false;
+      const gap=x-obj.x;
+      if(obj.lane===candidate)return gap<57;
+      // Opposite reefs must leave time to clear one and change lanes.
+      return !isSeal&&!obj.seal&&gap<42+speed*.35;
+    });
+    if(!blocked){
+      objects.push({x,lane:candidate,seal:isSeal});
+      return true;
+    }
+  }
+  return false;
 }
 function update(dt) {
   elapsed+=dt;
@@ -263,10 +274,21 @@ function update(dt) {
   }
   const chapter=Math.min(2,Math.floor(elapsed/23));
   if(chapter!==phase){phase=chapter;if(!gentle)paintBackdrop();get("tide").textContent=palettes[phase][0];tone([392,523,659]);}
-  next-=dt;
-  if(next<=0){addPair();next+=gentle?2:Math.max(1,1.6-elapsed*.008);}
   boatY+=(water(lane)-boatY)*Math.min(1,dt*18);
-  const speed=width*(gentle?.27:.36)*Math.min(gentle?1.2:1.45,1+elapsed*.006);
+  const speed=gentle
+    ? width*.27*Math.min(1.2,1+elapsed*.006)
+    : Math.max(245,width*.38)*Math.min(1.85,1+elapsed*.012);
+  const challenge=Math.min(1,elapsed/65);
+  nextRock-=dt;
+  nextSeal-=dt;
+  if(nextRock<=0){
+    nextRock=spawn(false,speed)
+      ? (gentle?1.4:1.05)+Math.random()*1.25-challenge*(gentle?.3:.5)
+      : .15;
+  }
+  if(nextSeal<=0){
+    nextSeal=spawn(true,speed)?(gentle?.9:.65)+Math.random()*1.45:.15;
+  }
   const playerX=boatX();
   for(const obj of objects){
     obj.x-=speed*dt;
@@ -287,7 +309,9 @@ function frame(now) {
   const dt=Math.min(.04,(now-(last||now))/1000);
   last=now;
   if(mode==="run")update(dt);
+  if(!gentle&&(mode==="intro"||mode==="run"))drift+=dt*(mode==="intro"?.5:1);
   ctx.drawImage(paper,0,0,width,height);
+  if(!gentle)paintWater(ctx,drift);
   if(mode==="intro"){
     rock(width*.82,water(0),1.08);
     rock(width*.64,water(1),.92);
@@ -298,7 +322,7 @@ function frame(now) {
     if(obj.seal)seal(obj.x,water(obj.lane),10);
     else rock(obj.x,water(obj.lane),1);
   }
-  boat(boatX(),boatY);
+  boat(boatX(),boatY,gentle?0:drift);
   requestAnimationFrame(frame);
 }
 function syncPace() {
